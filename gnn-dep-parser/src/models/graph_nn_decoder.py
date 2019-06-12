@@ -22,23 +22,29 @@ class GraphNNDecoder(DependencyDecoder):
 
         pc = model.add_subcollection()
         # MLP layer
-        self.head_MLP = MLP(pc, cfg.MLP_SIZE, leaky_relu, 'orthonormal', cfg.MLP_BIAS, cfg.MLP_DROP)
-        self.dept_MLP = MLP(pc, cfg.MLP_SIZE, leaky_relu, 'orthonormal', cfg.MLP_BIAS, cfg.MLP_DROP)
+        self.head_MLP = MLP(pc, cfg.MLP_SIZE, leaky_relu, 'orthonormal',
+                            cfg.MLP_BIAS, cfg.MLP_DROP)
+        self.dept_MLP = MLP(pc, cfg.MLP_SIZE, leaky_relu, 'orthonormal',
+                            cfg.MLP_BIAS, cfg.MLP_DROP)
 
         # Biaffine Attention Layer (Arc)
         arc_size = cfg.ARC_SIZE
-        self.arc_attn_mat = [BiaffineAttention(pc, arc_size, arc_size, 1, cfg.ARC_BIAS, 0)
-                             for _ in range(cfg.GRAPH_LAYERS+1)]
+        self.arc_attn_mat = [
+            BiaffineAttention(pc, arc_size, arc_size, 1, cfg.ARC_BIAS, 0)
+            for _ in range(cfg.GRAPH_LAYERS+1)]
 
         # Biaffine Attention Layer (Rel)
         rel_num = vocabulary.get_vocab_size('rel')
         rel_size = cfg.MLP_SIZE[-1]-cfg.ARC_SIZE
         self.rel_mask = np.array([1] + [0] * (rel_num-1))   # mask root relation
-        self.rel_attn = BiaffineAttention(pc, rel_size, rel_size, rel_num, cfg.REL_BIAS, 0)
+        self.rel_attn = BiaffineAttention(pc, rel_size, rel_size, rel_num,
+                                          cfg.REL_BIAS, 0)
 
         # Graph Network Layer
-        self.head_graphNN = GraphNNUnit(pc, arc_size, arc_size, leaky_relu, 'orthonormal')
-        self.dept_graphNN = GraphNNUnit(pc, arc_size, arc_size, leaky_relu, 'orthonormal')
+        self.head_gnn = GraphNNUnit(pc, arc_size, arc_size, leaky_relu,
+                                    'orthonormal')
+        self.dept_gnn = GraphNNUnit(pc, arc_size, arc_size, leaky_relu,
+                                    'orthonormal')
 
         # Save Variable
         self.arc_size, self.rel_size, self.rel_num = arc_size, rel_size, rel_num
@@ -129,7 +135,10 @@ class GraphNNDecoder(DependencyDecoder):
         else:
             if is_tree:
                 # MST Inference, Achieve Tree Edge.
-                arc_probs = np.transpose(np.reshape(dy.softmax(arc_mat).npvalue(), (sent_len, sent_len, batch_size), 'F'))
+                arc_probs = dy.softmax(arc_mat).npvalue()
+                arc_probs = np.reshape(arc_probs,
+                                       (sent_len, sent_len, batch_size), 'F')
+                arc_probs = np.transpose(arc_probs)
                 # Mask PAD
                 arc_masks = [np.array(masks['flat'][i:i+sent_len])
                              for i in range(0, flat_len, sent_len)]
@@ -145,7 +154,8 @@ class GraphNNDecoder(DependencyDecoder):
                 # Greedy Inference (argmax)
                 arc_pred = np.argmax(arc_mat.npvalue(), 0)
             # Pick Predicted Edge's <Head, Dept> pair.
-            flat_pred = [j+(i//sent_len)*sent_len for i, j in enumerate(arc_pred)]
+            flat_pred = [j+(i//sent_len)*sent_len
+                         for i, j in enumerate(arc_pred)]
             pred_rel = dy.pick_batch(head_rel, flat_pred, 1)
             # Predict Relation (mask ROOT)
             rel_mat = self.rel_attn(son_rel, pred_rel)
@@ -164,7 +174,8 @@ class GraphNNDecoder(DependencyDecoder):
             losses_list = gnn_losses + [arc_loss, rel_loss]
             return losses, losses_list
         else:
-            rel_pred = np.argmax(dy.reshape(rel_mat, (self.rel_num,)).npvalue(), 0)
+            rel_mat = dy.reshape(rel_mat, (self.rel_num,)).npvalue()
+            rel_pred = np.argmax(rel_mat, 0)
             pred = {}
             pred['head'], pred['rel'] = arc_pred, rel_pred
             return pred
