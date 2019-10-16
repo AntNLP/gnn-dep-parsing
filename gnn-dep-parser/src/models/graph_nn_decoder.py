@@ -109,9 +109,9 @@ class GraphNNDecoder(DependencyDecoder):
             # Async Update Function
             # Head-first
             # ((A_H, L), B)
-            head_arc = self.head_graphNN(FX, head_arc, is_train)
+            head_arc = self.head_gnn(FX, head_arc, is_train)
             FX_new = head_arc * arc_prob + DX
-            dept_arc = self.dept_graphNN(FX_new, dept_arc, is_train)
+            dept_arc = self.dept_gnn(FX_new, dept_arc, is_train)
 
         # ((L, L), B)
         arc_mat = self.arc_attn_mat[-1](head_arc, dept_arc)-1e9*(1-masks_2D)
@@ -131,7 +131,7 @@ class GraphNNDecoder(DependencyDecoder):
             truth_rel = dy.pick_batch(head_rel, truth['flat_head'], 1)
             # R -> Relation Set Size
             # ((R,), L*B)
-            rel_mat = self.rel_attn(son_rel, truth_rel)
+            rel_mat = self.rel_attn(dept_rel, truth_rel)
         else:
             if is_tree:
                 # MST Inference, Achieve Tree Edge.
@@ -158,7 +158,7 @@ class GraphNNDecoder(DependencyDecoder):
                          for i, j in enumerate(arc_pred)]
             pred_rel = dy.pick_batch(head_rel, flat_pred, 1)
             # Predict Relation (mask ROOT)
-            rel_mat = self.rel_attn(son_rel, pred_rel)
+            rel_mat = self.rel_attn(dept_rel, pred_rel)
             rel_mask = dy.inputTensor(self.rel_mask)
             rel_mat = rel_mat - 1e9*rel_mask
         if is_train:

@@ -9,11 +9,10 @@ import random
 
 class TokenRepresentation(object):
 
-    def __init__(
-        self,
-        model,
-        cfg,
-        vocabulary: Vocabulary):
+    def __init__(self,
+                 model,
+                 cfg,
+                 vocabulary: Vocabulary):
 
         pc = model.add_subcollection()
         word_num = vocabulary.get_vocab_size('word')

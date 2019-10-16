@@ -101,19 +101,19 @@ def main():
         indexes, masks, truth = train_batch.__next__()
         #print(indexes)
         vectors = token_repre(indexes, True)
-        vectors = encoder(vectors, None, cfg.RNN_X_DROP, cfg.RNN_H_DROP, True)
+        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, True)
         loss, part_loss = decoder(vectors, masks, truth, True, True)
         for i, l in enumerate([loss]+part_loss):
             valid_loss[i].append(l.value())
         loss.backward()
-        trainer.learning_rate = cfg.LR*cfg.LR_DECAY**(cnt_iter/cfg.LR_ANNEAL)
+        trainer.learning_rate = cfg.LR*cfg.LR_DECAY**(cnt_iter//cfg.LR_ANNEAL)
         trainer.update()
 
         if cnt_iter % cfg.VALID_ITER:
             continue
         # Validation
         for i in range(len(valid_loss)):
-            valid_loss[i] = str(round(np.mean(valid_loss[i])), 2)
+            valid_loss[i] = str(round(np.mean(valid_loss[i]), 2))
         avg_loss = ', '.join(valid_loss)
         logger.info("")
         logger.info("Iter: %d-%d, Avg_loss: %s, LR (%f), Best (%d)" %
