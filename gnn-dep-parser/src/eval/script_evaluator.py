@@ -1,6 +1,7 @@
 import logging
 logger = logging.getLogger('__main__')
 
+
 class ScriptEvaluator:
 
     def __init__(self, names, vocab):
@@ -32,7 +33,8 @@ class ScriptEvaluator:
         pred_list = []
         for truth, pred in zip(self.eval_set[name]['truth'], self.eval_set[name]['pred']):
             for truth_head, pred_head, truth_rel, pred_rel, tag in zip(truth['head'], pred['head'], truth['rel'], pred['rel'], truth['tag']):
-                if pred_head == 0: pred_rel = self.root_idx
+                if pred_head == 0:
+                    pred_rel = self.root_idx
                 if (truth_head or truth_rel) and tag not in self.ignore_tag:
                     total_token += 1
                     if truth_head == pred_head:
@@ -68,7 +70,8 @@ class ScriptEvaluator:
         return False
 
     def print_best_result(self, name):
-        logger.info('Best Results: UAS: %s, LAS: %s' % (self.eval_set[name]['Best_UAS'], self.eval_set[name]['Best_LAS']))
+        logger.info('Best Results: UAS: %s, LAS: %s' % (
+            self.eval_set[name]['Best_UAS'], self.eval_set[name]['Best_LAS']))
 
     def clear(self, name):
         self.eval_set[name]['pred'] = []

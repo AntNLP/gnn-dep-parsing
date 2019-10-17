@@ -1,9 +1,9 @@
 from .dep_decoder import DependencyDecoder
-from antu.io.vocabulary import Vocabulary
-from antu.io.configurators.ini_configurator import IniConfigurator
-from antu.nn.dynet.multi_layer_perception import MLP
-from antu.nn.dynet.attention.biaffine import BiaffineAttention
-from antu.nn.dynet.units.graph_nn_unit import GraphNNUnit
+from antu.io import Vocabulary
+from antu.io.configurators import IniConfigurator
+from antu.nn.dynet import MLP, GraphNNUnit
+from antu.nn.dynet.attention import BiaffineAttention
+from antu.nn.dynet.init import OrthogonalInitializer
 from utils.mst_decoder import MST_inference
 import dynet as dy
 import numpy as np
@@ -22,29 +22,33 @@ class GraphNNDecoder(DependencyDecoder):
 
         pc = model.add_subcollection()
         # MLP layer
-        self.head_MLP = MLP(pc, cfg.MLP_SIZE, leaky_relu, 'orthonormal',
-                            cfg.MLP_BIAS, cfg.MLP_DROP)
-        self.dept_MLP = MLP(pc, cfg.MLP_SIZE, leaky_relu, 'orthonormal',
-                            cfg.MLP_BIAS, cfg.MLP_DROP)
+        orth_init = OrthogonalInitializer
+        self.head_MLP = MLP(pc, cfg.MLP_SIZE, leaky_relu,
+                            cfg.MLP_DROP, cfg.MLP_BIAS, orth_init)
+        self.dept_MLP = MLP(pc, cfg.MLP_SIZE, leaky_relu,
+                            cfg.MLP_DROP, cfg.MLP_BIAS, orth_init)
 
         # Biaffine Attention Layer (Arc)
         arc_size = cfg.ARC_SIZE
+        zero_init = dy.ConstInitializer(0)
         self.arc_attn_mat = [
-            BiaffineAttention(pc, arc_size, arc_size, 1, cfg.ARC_BIAS, 0)
+            BiaffineAttention(pc, arc_size, arc_size, 1,
+                              cfg.ARC_BIAS, zero_init)
             for _ in range(cfg.GRAPH_LAYERS+1)]
 
         # Biaffine Attention Layer (Rel)
         rel_num = vocabulary.get_vocab_size('rel')
         rel_size = cfg.MLP_SIZE[-1]-cfg.ARC_SIZE
-        self.rel_mask = np.array([1] + [0] * (rel_num-1))   # mask root relation
+        self.rel_mask = np.array(
+            [1] + [0] * (rel_num-1))   # mask root relation
         self.rel_attn = BiaffineAttention(pc, rel_size, rel_size, rel_num,
-                                          cfg.REL_BIAS, 0)
+                                          cfg.REL_BIAS, zero_init)
 
         # Graph Network Layer
-        self.head_gnn = GraphNNUnit(pc, arc_size, arc_size, leaky_relu,
-                                    'orthonormal')
-        self.dept_gnn = GraphNNUnit(pc, arc_size, arc_size, leaky_relu,
-                                    'orthonormal')
+        self.head_gnn = GraphNNUnit(
+            pc, arc_size, arc_size, leaky_relu, orth_init)
+        self.dept_gnn = GraphNNUnit(
+            pc, arc_size, arc_size, leaky_relu, orth_init)
 
         # Save Variable
         self.arc_size, self.rel_size, self.rel_num = arc_size, rel_size, rel_num
@@ -63,6 +67,7 @@ class GraphNNDecoder(DependencyDecoder):
             X = dy.dropout_dim(X, 1, self.cfg.MLP_DROP)
         # M_H -> MLP hidden size
         # ((M_H, L), B)
+        # head_mat = leaky_relu(self.head_MLP(X, is_train))
         head_mat = self.head_MLP(X, is_train)
         # ((M_H, L), B)
         dept_mat = self.dept_MLP(X, is_train)
@@ -86,7 +91,7 @@ class GraphNNDecoder(DependencyDecoder):
         for k in range(self.cfg.GRAPH_LAYERS):
             # Graph Weights
             # ((L, L), B)
-            arc_mat  = self.arc_attn_mat[k](head_arc, dept_arc)-1e9*(1-masks_2D)
+            arc_mat = self.arc_attn_mat[k](head_arc, dept_arc)-1e9*(1-masks_2D)
             arc_prob = dy.softmax(arc_mat)
 
             # Layer-wise Loss
@@ -109,9 +114,9 @@ class GraphNNDecoder(DependencyDecoder):
             # Async Update Function
             # Head-first
             # ((A_H, L), B)
-            head_arc = self.head_gnn(FX, head_arc, is_train)
+            head_arc = self.head_gnn(FX, head_arc)
             FX_new = head_arc * arc_prob + DX
-            dept_arc = self.dept_gnn(FX_new, dept_arc, is_train)
+            dept_arc = self.dept_gnn(FX_new, dept_arc)
 
         # ((L, L), B)
         arc_mat = self.arc_attn_mat[-1](head_arc, dept_arc)-1e9*(1-masks_2D)
@@ -195,4 +200,3 @@ class GraphNNDecoder(DependencyDecoder):
         It is one of the prerequisites for Dynet save/load method.
         """
         return self.pc
-

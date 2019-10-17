@@ -1,14 +1,22 @@
-import argparse, _pickle, math, os, random, sys, time, logging
-random.seed(666)
-import numpy as np
-np.random.seed(666)
-from collections import Counter
-from antu.io.configurators.ini_configurator import IniConfigurator
-from antu.io.vocabulary import Vocabulary
-from antu.io.ext_embedding_readers import glove_reader
-from utils.PTB_dataset import DatasetSetting, PTBDataset
-from utils.conllu_reader import PTBReader
 from antu.utils.dual_channel_logger import dual_channel_logger
+from utils.conllu_reader import PTBReader
+from utils.PTB_dataset import DatasetSetting, PTBDataset
+from antu.io.ext_embedding_readers import glove_reader
+from antu.io import Vocabulary
+from antu.io.configurators import IniConfigurator
+from collections import Counter
+import numpy as np
+import argparse
+import _pickle
+import math
+import os
+import random
+import sys
+import time
+import logging
+import multiprocessing as mp
+random.seed(666)
+np.random.seed(666)
 
 
 def main():
@@ -43,24 +51,24 @@ def main():
     dynet_config.set_gpu()
     import dynet as dy
     from models.token_representation import TokenRepresentation
-    from antu.nn.dynet.seq2seq_encoders.rnn_builder import DeepBiLSTMBuilder, orthonormal_VanillaLSTMBuilder
+    from antu.nn.dynet.seq2seq_encoders import DeepBiRNNBuilder, orthonormal_VanillaLSTMBuilder
     from models.graph_nn_decoder import GraphNNDecoder
 
     # Build the dataset of the training process
-    ## Build data reader
+    # Build data reader
     data_reader = PTBReader(
         field_list=['word', 'tag', 'head', 'rel'],
         root='0\t**root**\t_\t**rcpos**\t**rpos**\t_\t0\t**rrel**\t_\t_',
         spacer=r'[\t]',)
-    ## Build vocabulary with pretrained glove
+    # Build vocabulary with pretrained glove
     vocabulary = Vocabulary()
     g_word, _ = glove_reader(cfg.GLOVE)
     pretrained_vocabs = {'glove': g_word}
     vocabulary.extend_from_pretrained_vocab(pretrained_vocabs)
-    ## Setup datasets
+    # Setup datasets
     datasets_settings = {'train': DatasetSetting(cfg.TRAIN, True),
                          'dev': DatasetSetting(cfg.DEV, False),
-                         'test': DatasetSetting(cfg.TEST, False),}
+                         'test': DatasetSetting(cfg.TEST, False), }
     datasets = PTBDataset(vocabulary, datasets_settings, data_reader)
     counters = {'word': Counter(), 'tag': Counter(), 'rel': Counter()}
     datasets.build_dataset(counters, no_pad_namespace={'rel'},
@@ -75,9 +83,8 @@ def main():
     # Token Representation Layer
     token_repre = TokenRepresentation(pc, cfg, datasets.vocabulary)
     # BiLSTM Encoder Layer
-    encoder = DeepBiLSTMBuilder(pc, cfg.ENC_LAYERS, token_repre.token_dim,
-                                cfg.ENC_H_DIM, orthonormal_VanillaLSTMBuilder,
-                                param_init=True, fb_fusion=True)
+    encoder = DeepBiRNNBuilder(pc, cfg.ENC_LAYERS, token_repre.token_dim,
+                               cfg.ENC_H_DIM, orthonormal_VanillaLSTMBuilder)
     # GNN Decoder Layer
     decoder = GraphNNDecoder(pc, cfg, datasets.vocabulary)
     # PTB Evaluator
@@ -88,6 +95,10 @@ def main():
         return len(ins['word'])
     train_batch = datasets.get_batches('train', cfg.TRAIN_BATCH_SIZE, True, cmp,
                                        True)
+    valid_batch = list(datasets.get_batches('dev', cfg.TEST_BATCH_SIZE, False, cmp, False))
+    test_batch = list(datasets.get_batches('test', cfg.TEST_BATCH_SIZE, False, cmp, False))
+
+
 
     # Train model
     BEST_DEV_LAS = BEST_DEV_UAS = BEST_ITER = cnt_iter = 0
@@ -99,18 +110,18 @@ def main():
         dy.renew_cg()
         cnt_iter += 1
         indexes, masks, truth = train_batch.__next__()
-        #print(indexes)
         vectors = token_repre(indexes, True)
-        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, True)
+        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, True)
         loss, part_loss = decoder(vectors, masks, truth, True, True)
         for i, l in enumerate([loss]+part_loss):
             valid_loss[i].append(l.value())
         loss.backward()
-        trainer.learning_rate = cfg.LR*cfg.LR_DECAY**(cnt_iter//cfg.LR_ANNEAL)
+        trainer.learning_rate = cfg.LR*cfg.LR_DECAY**(cnt_iter/cfg.LR_ANNEAL)
         trainer.update()
 
         if cnt_iter % cfg.VALID_ITER:
             continue
+
         # Validation
         for i in range(len(valid_loss)):
             valid_loss[i] = str(round(np.mean(valid_loss[i]), 2))
@@ -119,14 +130,13 @@ def main():
         logger.info("Iter: %d-%d, Avg_loss: %s, LR (%f), Best (%d)" %
                     (cnt_iter/cfg.VALID_ITER, cnt_iter, avg_loss,
                      trainer.learning_rate, BEST_ITER))
+
         valid_loss = [[] for i in range(cfg.GRAPH_LAYERS+3)]
         my_eval.clear('Valid')
-        valid_batch = datasets.get_batches('dev', cfg.TEST_BATCH_SIZE, False,
-                                           cmp, False)
         for indexes, masks, truth in valid_batch:
             dy.renew_cg()
             vectors = token_repre(indexes, False)
-            vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, False)
+            vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False)
             pred = decoder(vectors, masks, None, False, True)
             my_eval.add_truth('Valid', truth)
             my_eval.add_pred('Valid', pred)
@@ -135,13 +145,13 @@ def main():
             BEST_ITER = cnt_iter/cfg.VALID_ITER
             os.system('cp %s.data %s.data' % (cfg.LAST_FILE, cfg.BEST_FILE))
             os.system('cp %s.meta %s.meta' % (cfg.LAST_FILE, cfg.BEST_FILE))
+
+        # Just record test result
         my_eval.clear('Test')
-        test_batch = datasets.get_batches('test', cfg.TEST_BATCH_SIZE, False,
-                                          cmp, False)
         for indexes, masks, truth in test_batch:
             dy.renew_cg()
             vectors = token_repre(indexes, False)
-            vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, False)
+            vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False)
             pred = decoder(vectors, masks, None, False, True)
             my_eval.add_truth('Test', truth)
             my_eval.add_pred('Test', pred)
@@ -150,13 +160,14 @@ def main():
 
     test_pc = dy.ParameterCollection()
     token_repre, encoder, decoder = dy.load(cfg.BEST_FILE, test_pc)
+
     my_eval.clear('Test')
     test_batch = datasets.get_batches('test', cfg.TEST_BATCH_SIZE, False, cmp,
                                       False)
     for indexes, masks, truth in test_batch:
         dy.renew_cg()
         vectors = token_repre(indexes, False)
-        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, False)
+        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False)
         pred = decoder(vectors, masks, None, False, True)
         my_eval.add_truth('Test', truth)
         my_eval.add_pred('Test', pred)

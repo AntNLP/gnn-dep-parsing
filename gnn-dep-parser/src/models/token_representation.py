@@ -1,10 +1,10 @@
+import random
+import dynet as dy
+import numpy as np
 from typing import Dict, TypeVar, List
 from antu.io.vocabulary import Vocabulary
 from antu.io.ext_embedding_readers import glove_reader
 Indices = TypeVar("Indices", List[int], List[List[int]])
-import numpy as np
-import dynet as dy
-import random
 
 
 class TokenRepresentation(object):
@@ -27,7 +27,8 @@ class TokenRepresentation(object):
         glove_num = vocabulary.get_vocab_size('glove')
         glove_vec = unk_pad_vec + unk_pad_vec + glove_vec
         glove_vec = np.array(glove_vec, dtype=np.float32)/np.std(glove_vec)
-        self.glookup = pc.lookup_parameters_from_numpy(glove_vec.astype(np.float32))
+        self.glookup = pc.lookup_parameters_from_numpy(
+            glove_vec.astype(np.float32))
 
         self.token_dim = cfg.WORD_DIM + cfg.TAG_DIM
         self.vocabulary = vocabulary
@@ -35,16 +36,17 @@ class TokenRepresentation(object):
         self.spec = (cfg, vocabulary)
 
     def __call__(
-        self,
-        indexes: Dict[str, List[Indices]],
-        is_train=False) -> List[dy.Expression]:
+            self,
+            indexes: Dict[str, List[Indices]],
+            is_train=False) -> List[dy.Expression]:
         len_s = len(indexes['head'][0])
         batch_num = len(indexes['head'])
         vectors = []
         for i in range(len_s):
             # map token indexes -> vector
             w_idxes = [indexes['word']['word'][x][i] for x in range(batch_num)]
-            g_idxes = [indexes['word']['glove'][x][i] for x in range(batch_num)]
+            g_idxes = [indexes['word']['glove'][x][i]
+                       for x in range(batch_num)]
             t_idxes = [indexes['tag']['tag'][x][i] for x in range(batch_num)]
             w_vec = dy.lookup_batch(self.wlookup, w_idxes)
             g_vec = dy.lookup_batch(self.glookup, g_idxes, False)
@@ -56,8 +58,10 @@ class TokenRepresentation(object):
             # For only tag dropped: word * 1.5
             # For both word and tag dropped: 0 vector
             if is_train:
-                wm = np.random.binomial(1, 1.-self.cfg.WORD_DROP, batch_num).astype(np.float32)
-                tm = np.random.binomial(1, 1.-self.cfg.TAG_DROP, batch_num).astype(np.float32)
+                wm = np.random.binomial(
+                    1, 1.-self.cfg.WORD_DROP, batch_num).astype(np.float32)
+                tm = np.random.binomial(
+                    1, 1.-self.cfg.TAG_DROP, batch_num).astype(np.float32)
                 scale = np.logical_or(wm, tm) * 3 / (2*wm + tm + 1e-12)
                 wm *= scale
                 tm *= scale
