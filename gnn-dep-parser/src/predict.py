@@ -28,7 +28,6 @@ def main():
                            help='The name of the experiment.')
     argparser.add_argument('--model', default='s2s',
                            help='s2s: seq2seq-head-selection-model'
-                           's2tBFS: seq2tree-BFS-decoder-model'
                            's2tDFS: seq2tree-DFS-decoder-model')
     argparser.add_argument('--gpu', default='0', help='GPU ID (-1 to cpu)')
     args, extra_args = argparser.parse_known_args()
@@ -84,12 +83,11 @@ def main():
 
     def cmp(ins):
         return len(ins['word'])
-    test_batch = datasets.get_batches('test', cfg.TEST_BATCH_SIZE, False, cmp,
-                                      False)
+    test_batch = datasets.get_batches('test', cfg.TEST_BATCH_SIZE, False, cmp, False)
     for indexes, masks, truth in test_batch:
         dy.renew_cg()
         vectors = token_repre(indexes, False)
-        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, False)
+        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False, False)
         pred = decoder(vectors, masks, None, False, True)
         my_eval.add_truth('Test', truth)
         my_eval.add_pred('Test', pred)

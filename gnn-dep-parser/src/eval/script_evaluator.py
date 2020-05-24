@@ -70,7 +70,7 @@ class ScriptEvaluator:
         return False
 
     def print_best_result(self, name):
-        logger.info('Best Results: UAS: %s, LAS: %s' % (
+        logger.info('Best Results: UAS: %f, LAS: %f' % (
             self.eval_set[name]['Best_UAS'], self.eval_set[name]['Best_LAS']))
 
     def clear(self, name):

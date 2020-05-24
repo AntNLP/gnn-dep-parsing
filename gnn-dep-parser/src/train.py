@@ -29,7 +29,6 @@ def main():
                            help='The name of the experiment.')
     argparser.add_argument('--model', default='s2s',
                            help='s2s: seq2seq-head-selection-model'
-                           's2tBFS: seq2tree-BFS-decoder-model'
                            's2tDFS: seq2tree-DFS-decoder-model')
     argparser.add_argument('--gpu', default='0', help='GPU ID (-1 to cpu)')
     args, extra_args = argparser.parse_known_args()
@@ -71,14 +70,12 @@ def main():
                          'test': DatasetSetting(cfg.TEST, False), }
     datasets = PTBDataset(vocabulary, datasets_settings, data_reader)
     counters = {'word': Counter(), 'tag': Counter(), 'rel': Counter()}
-    datasets.build_dataset(counters, no_pad_namespace={'rel'},
-                           no_unk_namespace={'rel'})
+    datasets.build_dataset(counters, no_pad_namespace={'rel'}, no_unk_namespace={'rel'})
 
     # Build model
     # Parameter
     pc = dy.ParameterCollection()
-    trainer = dy.AdamTrainer(pc, alpha=cfg.LR, beta_1=cfg.ADAM_BETA1,
-                             beta_2=cfg.ADAM_BETA2, eps=cfg.EPS)
+    trainer = dy.AdamTrainer(pc, cfg.LR, cfg.ADAM_BETA1, cfg.ADAM_BETA2, cfg.EPS)
 
     # Token Representation Layer
     token_repre = TokenRepresentation(pc, cfg, datasets.vocabulary)
@@ -93,15 +90,13 @@ def main():
     # Build Training Batch
     def cmp(ins):
         return len(ins['word'])
-    train_batch = datasets.get_batches('train', cfg.TRAIN_BATCH_SIZE, True, cmp,
-                                       True)
+    train_batch = datasets.get_batches('train', cfg.TRAIN_BATCH_SIZE, True, cmp, True)
     valid_batch = list(datasets.get_batches('dev', cfg.TEST_BATCH_SIZE, False, cmp, False))
     test_batch = list(datasets.get_batches('test', cfg.TEST_BATCH_SIZE, False, cmp, False))
 
-
-
     # Train model
-    BEST_DEV_LAS = BEST_DEV_UAS = BEST_ITER = cnt_iter = 0
+    BEST_DEV_LAS = BEST_DEV_UAS = BEST_ITER = 0
+    cnt_iter = -cfg.WARM * cfg.GRAPH_LAYERS
     valid_loss = [[] for i in range(cfg.GRAPH_LAYERS+3)]
     logger.info("Experiment name: %s" % args.name)
     SHA = os.popen('git log -1 | head -n 1 | cut -c 8-13').readline().rstrip()
@@ -111,17 +106,15 @@ def main():
         cnt_iter += 1
         indexes, masks, truth = train_batch.__next__()
         vectors = token_repre(indexes, True)
-        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, True)
-        loss, part_loss = decoder(vectors, masks, truth, True, True)
+        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False, True)
+        loss, part_loss = decoder(vectors, masks, truth, cnt_iter, True, True)
         for i, l in enumerate([loss]+part_loss):
             valid_loss[i].append(l.value())
         loss.backward()
-        trainer.learning_rate = cfg.LR*cfg.LR_DECAY**(cnt_iter/cfg.LR_ANNEAL)
+        trainer.learning_rate = cfg.LR*cfg.LR_DECAY**(max(cnt_iter, 0)/cfg.LR_ANNEAL)
         trainer.update()
 
-        if cnt_iter % cfg.VALID_ITER:
-            continue
-
+        if cnt_iter % cfg.VALID_ITER: continue
         # Validation
         for i in range(len(valid_loss)):
             valid_loss[i] = str(round(np.mean(valid_loss[i]), 2))
@@ -136,8 +129,8 @@ def main():
         for indexes, masks, truth in valid_batch:
             dy.renew_cg()
             vectors = token_repre(indexes, False)
-            vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False)
-            pred = decoder(vectors, masks, None, False, True)
+            vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False, False)
+            pred = decoder(vectors, masks, None, cnt_iter, False, True)
             my_eval.add_truth('Valid', truth)
             my_eval.add_pred('Valid', pred)
         dy.save(cfg.LAST_FILE, [token_repre, encoder, decoder])
@@ -151,24 +144,22 @@ def main():
         for indexes, masks, truth in test_batch:
             dy.renew_cg()
             vectors = token_repre(indexes, False)
-            vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False)
-            pred = decoder(vectors, masks, None, False, True)
+            vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False, False)
+            pred = decoder(vectors, masks, None, cnt_iter, False, True)
             my_eval.add_truth('Test', truth)
             my_eval.add_pred('Test', pred)
         my_eval.evaluation('Test', cfg.PRED_TEST, cfg.TEST)
     my_eval.print_best_result('Valid')
 
+    # Final Test
     test_pc = dy.ParameterCollection()
     token_repre, encoder, decoder = dy.load(cfg.BEST_FILE, test_pc)
-
     my_eval.clear('Test')
-    test_batch = datasets.get_batches('test', cfg.TEST_BATCH_SIZE, False, cmp,
-                                      False)
     for indexes, masks, truth in test_batch:
         dy.renew_cg()
         vectors = token_repre(indexes, False)
-        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False)
-        pred = decoder(vectors, masks, None, False, True)
+        vectors = encoder(vectors, None, cfg.RNN_DROP, cfg.RNN_DROP, np.array(masks['1D']).T, False, False)
+        pred = decoder(vectors, masks, None, 0, False, True)
         my_eval.add_truth('Test', truth)
         my_eval.add_pred('Test', pred)
     my_eval.evaluation('Test', cfg.PRED_TEST, cfg.TEST)

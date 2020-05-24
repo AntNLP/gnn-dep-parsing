@@ -3,6 +3,15 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Model Data
+train_v3.3.0.conllu
+dev_v3.3.0.conllu
+test_v3.3.0.conllu
+glove.6B.100d.txt.gz
+
+# Model checkpoint
+ckpts/
+
 # C extensions
 *.so
 
