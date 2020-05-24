@@ -9,10 +9,7 @@ Indices = TypeVar("Indices", List[int], List[List[int]])
 
 class TokenRepresentation(object):
 
-    def __init__(self,
-                 model,
-                 cfg,
-                 vocabulary: Vocabulary):
+    def __init__(self, model, cfg, vocabulary: Vocabulary):
 
         pc = model.add_subcollection()
         word_num = vocabulary.get_vocab_size('word')
@@ -25,28 +22,26 @@ class TokenRepresentation(object):
         glove_dim = len(glove_vec[0])
         unk_pad_vec = [[0.0 for _ in range(glove_dim)]]
         glove_num = vocabulary.get_vocab_size('glove')
+        std = np.std(glove_vec)
         glove_vec = unk_pad_vec + unk_pad_vec + glove_vec
-        glove_vec = np.array(glove_vec, dtype=np.float32)/np.std(glove_vec)
-        self.glookup = pc.lookup_parameters_from_numpy(
-            glove_vec.astype(np.float32))
+        glove_vec = np.array(glove_vec, dtype=np.float32)/std
+        self.glookup = pc.lookup_parameters_from_numpy(glove_vec.astype(np.float32))
 
         self.token_dim = cfg.WORD_DIM + cfg.TAG_DIM
         self.vocabulary = vocabulary
         self.pc, self.cfg = pc, cfg
         self.spec = (cfg, vocabulary)
 
-    def __call__(
-            self,
-            indexes: Dict[str, List[Indices]],
-            is_train=False) -> List[dy.Expression]:
+    def __call__(self,
+                 indexes: Dict[str, List[Indices]],
+                 is_train=False) -> List[dy.Expression]:
         len_s = len(indexes['head'][0])
         batch_num = len(indexes['head'])
         vectors = []
         for i in range(len_s):
             # map token indexes -> vector
             w_idxes = [indexes['word']['word'][x][i] for x in range(batch_num)]
-            g_idxes = [indexes['word']['glove'][x][i]
-                       for x in range(batch_num)]
+            g_idxes = [indexes['word']['glove'][x][i] for x in range(batch_num)]
             t_idxes = [indexes['tag']['tag'][x][i] for x in range(batch_num)]
             w_vec = dy.lookup_batch(self.wlookup, w_idxes)
             g_vec = dy.lookup_batch(self.glookup, g_idxes, False)
@@ -58,10 +53,8 @@ class TokenRepresentation(object):
             # For only tag dropped: word * 1.5
             # For both word and tag dropped: 0 vector
             if is_train:
-                wm = np.random.binomial(
-                    1, 1.-self.cfg.WORD_DROP, batch_num).astype(np.float32)
-                tm = np.random.binomial(
-                    1, 1.-self.cfg.TAG_DROP, batch_num).astype(np.float32)
+                wm = np.random.binomial( 1, 1.-self.cfg.WORD_DROP, batch_num).astype(np.float32)
+                tm = np.random.binomial( 1, 1.-self.cfg.TAG_DROP, batch_num).astype(np.float32)
                 scale = np.logical_or(wm, tm) * 3 / (2*wm + tm + 1e-12)
                 wm *= scale
                 tm *= scale
