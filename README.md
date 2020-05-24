@@ -10,6 +10,15 @@ The code of "Graph-based Dependency Parsing with Graph Neural Networks".
 * [`antu`](https://github.com/JT-Ushio/antu): 0.0.5
 
 
+## Example log
+
+An example of [experiment log](https://github.com/JT-Ushio/gnn-dep-parsing-1/blob/master/gnn-dep-parser/exper.log).
+
+|  PTB-UAS   | PTB-LAS  |
+|  ----  | ----  |
+| 96.0455  | 94.3539 |
+
+
 
 ## Training
 
